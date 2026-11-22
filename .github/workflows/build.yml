@@ -3,6 +3,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15-intel
@@ -27,3 +30,13 @@ jobs:
         with:
           name: DSHPhone-unsigned.ipa
           path: DSHPhone-unsigned.ipa
+      - name: Publish release (direct install URL)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.2.0-build${{ github.run_number }}
+          name: dsh-phone v0.2.0 (build ${{ github.run_number }})
+          files: DSHPhone-unsigned.ipa
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
