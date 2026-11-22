@@ -74,9 +74,10 @@ struct WebView: UIViewRepresentable {
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler,
                              PHPickerViewControllerDelegate, UIDocumentPickerDelegate,
-                             AVSpeechSynthesizerDelegate {
+                             AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
         weak var web: WKWebView?
         let synthesizer = AVSpeechSynthesizer()
+        var audioPlayer: AVAudioPlayer?
 
         override init() {
             super.init()
@@ -98,6 +99,11 @@ struct WebView: UIViewRepresentable {
         /// Reload if iOS kills the web content process (memory pressure).
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
             webView.load(URLRequest(url: PHONE_URL))
+        }
+
+        /// Advertise native playback capability once the page is up.
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.evaluateJavaScript("window.__phoneHasPlayAudio = true;", completionHandler: nil)
         }
 
         /// JS: window.webkit.messageHandlers.phone.postMessage({ kind: "photos" | "documents" })
@@ -134,6 +140,17 @@ struct WebView: UIViewRepresentable {
                 synthesizer.speak(utterance)
             case "stopSpeech":
                 synthesizer.stopSpeaking(at: .immediate)
+            case "playAudio":
+                if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64) {
+                    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+                    try? AVAudioSession.sharedInstance().setActive(true)
+                    audioPlayer = try? AVAudioPlayer(data: data)
+                    audioPlayer?.delegate = self
+                    audioPlayer?.play()
+                    postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
+                }
+            case "stopAudio":
+                audioPlayer?.stop()
             case "photos":
                 var config = PHPickerConfiguration()
                 config.selectionLimit = 10
@@ -215,6 +232,11 @@ struct WebView: UIViewRepresentable {
             postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
         }
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+            postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
+        }
+
+        /* AVAudioPlayer (neural mp3 playback) callbacks */
+        func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
             postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
         }
 
