@@ -2,6 +2,7 @@ import SwiftUI
 import WebKit
 import PhotosUI
 import UniformTypeIdentifiers
+import AVFoundation
 
 /// URL of the dsh-phone PWA served by the DSH host plugin.
 let PHONE_URL = URL(string: "https://babel.tail977397.ts.net:8443/")!
@@ -72,8 +73,15 @@ struct WebView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler,
-                             PHPickerViewControllerDelegate, UIDocumentPickerDelegate {
+                             PHPickerViewControllerDelegate, UIDocumentPickerDelegate,
+                             AVSpeechSynthesizerDelegate {
         weak var web: WKWebView?
+        let synthesizer = AVSpeechSynthesizer()
+
+        override init() {
+            super.init()
+            synthesizer.delegate = self
+        }
 
         /// Trust the pinned host's self-signed certificate, and nothing else.
         func webView(_ webView: WKWebView,
@@ -106,6 +114,26 @@ struct WebView: UIViewRepresentable {
                 }
             case "clearToken":
                 UserDefaults.standard.removeObject(forKey: "phoneToken")
+            case "listVoices":
+                let voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+                let arr = voices.map { ["name": $0.name, "id": $0.identifier, "lang": $0.language] }
+                if let data = try? JSONSerialization.data(withJSONObject: arr),
+                   let json = String(data: data, encoding: .utf8) {
+                    postJS("window.__phoneVoices && window.__phoneVoices(\(json))")
+                }
+            case "speak":
+                let utterance = AVSpeechUtterance(string: body["text"] as? String ?? "")
+                if let identifier = body["voiceId"] as? String,
+                   let v = AVSpeechSynthesisVoice(identifier: identifier) {
+                    utterance.voice = v
+                }
+                utterance.rate = AVSpeechUtteranceDefaultSpeechRate * (body["rate"] as? Float ?? 1.05)
+                utterance.pitchMultiplier = body["pitch"] as? Float ?? 1.0
+                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+                try? AVAudioSession.sharedInstance().setActive(true)
+                synthesizer.speak(utterance)
+            case "stopSpeech":
+                synthesizer.stopSpeaking(at: .immediate)
             case "photos":
                 var config = PHPickerConfiguration()
                 config.selectionLimit = 10
@@ -177,6 +205,17 @@ struct WebView: UIViewRepresentable {
 
         func postNotice(_ text: String) {
             postJS("window.__phoneNotice && window.__phoneNotice(\(Self.jsString(text)))")
+        }
+
+        /* AVSpeechSynthesizer callbacks → tell the page when playback starts/ends */
+        func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+            postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
+        }
+        func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+            postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
+        }
+        func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+            postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
         }
 
         func postFiles(_ files: [[String: Any]], kind: String) {
