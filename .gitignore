@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# build output
+build/
+DerivedData/
+*.ipa
+
+# XcodeGen
+DSHPhone.xcodeproj/

@@ -1,0 +1,30 @@
+name: DSHPhone
+options:
+  bundleIdPrefix: com.samuel
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  DSHPhone:
+    type: application
+    platform: iOS
+    sources: [DSHPhone]
+    settings:
+      base:
+        INFOPLIST_FILE: DSHPhone/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.samuel.dshphone
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.9"
+    info:
+      path: DSHPhone/Info.plist
+      properties:
+        CFBundleDisplayName: DSH phone
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: "Take photos to send to your assistant."
+        NSMicrophoneUsageDescription: "Talk to your assistant."
+        NSPhotoLibraryUsageDescription: "Pick photos to send to your assistant."
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
