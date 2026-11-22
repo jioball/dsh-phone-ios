@@ -44,6 +44,16 @@ struct WebView: UIViewRepresentable {
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(context.coordinator, name: "phone")
+        /* Re-seed the pairing PIN into localStorage before any page script runs,
+           so the pairing screen only appears when the PIN genuinely changes. */
+        if let token = UserDefaults.standard.string(forKey: "phoneToken"), !token.isEmpty {
+            let script = WKUserScript(
+                source: "localStorage.setItem('dsh-phone-token', \(Coordinator.jsString(token)));",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(script)
+        }
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         web.allowsBackForwardNavigationGestures = false
@@ -90,6 +100,12 @@ struct WebView: UIViewRepresentable {
                   let kind = body["kind"] as? String,
                   let top = Self.topViewController() else { return }
             switch kind {
+            case "setToken":
+                if let token = body["token"] as? String, !token.isEmpty {
+                    UserDefaults.standard.set(token, forKey: "phoneToken")
+                }
+            case "clearToken":
+                UserDefaults.standard.removeObject(forKey: "phoneToken")
             case "photos":
                 var config = PHPickerConfiguration()
                 config.selectionLimit = 10
