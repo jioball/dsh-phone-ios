@@ -48,6 +48,8 @@ struct WebView: UIViewRepresentable {
         web.navigationDelegate = context.coordinator
         web.allowsBackForwardNavigationGestures = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.scrollView.alwaysBounceVertical = false  /* the chat list scrolls; never the shell */
+        web.scrollView.keyboardDismissMode = .onDrag /* scroll gesture dismisses keyboard, doesn't drag it */
         web.isOpaque = false
         web.backgroundColor = UIColor(red: 0.039, green: 0.039, blue: 0.047, alpha: 1)
         context.coordinator.web = web
