@@ -3,6 +3,7 @@ import WebKit
 import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
+import MediaPlayer
 
 /// URL of the dsh-phone PWA served by the DSH host plugin.
 let PHONE_URL = URL(string: "https://babel.tail977397.ts.net:8443/")!
@@ -78,10 +79,100 @@ struct WebView: UIViewRepresentable {
         weak var web: WKWebView?
         let synthesizer = AVSpeechSynthesizer()
         var audioPlayer: AVAudioPlayer?
+        var nowPlayingTimer: Timer?
 
         override init() {
             super.init()
             synthesizer.delegate = self
+            setupRemoteCommands()
+        }
+
+        /* ---------- audio session & Now Playing ---------- */
+
+        /// Playback session that DUCKS other apps' audio (music/video/PiP keep
+        /// playing quietly while the assistant speaks, then resume at full volume).
+        func activateAudioSession() {
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
+
+        func deactivateAudioSession() {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+
+        func setupRemoteCommands() {
+            let center = MPRemoteCommandCenter.shared()
+            center.playCommand.isEnabled = true
+            center.playCommand.addTarget { [weak self] _ in
+                self?.audioPlayer?.play()
+                self?.postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
+                return .success
+            }
+            center.pauseCommand.isEnabled = true
+            center.pauseCommand.addTarget { [weak self] _ in
+                self?.audioPlayer?.pause()
+                self?.postJS("window.__phoneTtsState && window.__phoneTtsState('pause')")
+                return .success
+            }
+            center.togglePlayPauseCommand.isEnabled = true
+            center.togglePlayPauseCommand.addTarget { [weak self] _ in
+                guard let player = self?.audioPlayer else { return .commandFailed }
+                if player.isPlaying {
+                    player.pause()
+                    self?.postJS("window.__phoneTtsState && window.__phoneTtsState('pause')")
+                } else {
+                    player.play()
+                    self?.postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
+                }
+                return .success
+            }
+            center.changePlaybackPositionCommand.isEnabled = true
+            center.changePlaybackPositionCommand.addTarget { [weak self] event in
+                guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+                self?.audioPlayer?.currentTime = event.positionTime
+                self?.refreshNowPlayingElapsed()
+                return .success
+            }
+            center.nextTrackCommand.isEnabled = true
+            center.nextTrackCommand.addTarget { [weak self] _ in
+                self?.postJS("window.__phoneCommand && window.__phoneCommand('next')")
+                return .success
+            }
+            center.previousTrackCommand.isEnabled = true
+            center.previousTrackCommand.addTarget { [weak self] _ in
+                self?.postJS("window.__phoneCommand && window.__phoneCommand('prev')")
+                return .success
+            }
+        }
+
+        func updateNowPlaying(title: String, duration: TimeInterval) {
+            var info: [String: Any] = [
+                MPMediaItemPropertyTitle: title,
+                MPMediaItemPropertyArtist: "dsh-phone",
+                MPNowPlayingInfoPropertyPlaybackRate: 1.0,
+            ]
+            if duration > 0 {
+                info[MPMediaItemPropertyPlaybackDuration] = duration
+            }
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        }
+
+        func refreshNowPlayingElapsed() {
+            guard var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = audioPlayer?.currentTime ?? 0
+            MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        }
+
+        func startNowPlayingTimer() {
+            nowPlayingTimer?.invalidate()
+            nowPlayingTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+                self?.refreshNowPlayingElapsed()
+            }
+        }
+
+        func stopNowPlayingTimer() {
+            nowPlayingTimer?.invalidate()
+            nowPlayingTimer = nil
         }
 
         /// Trust the pinned host's self-signed certificate, and nothing else.
@@ -135,22 +226,31 @@ struct WebView: UIViewRepresentable {
                 }
                 utterance.rate = AVSpeechUtteranceDefaultSpeechRate * (body["rate"] as? Float ?? 1.05)
                 utterance.pitchMultiplier = body["pitch"] as? Float ?? 1.0
-                try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-                try? AVAudioSession.sharedInstance().setActive(true)
+                activateAudioSession()
                 synthesizer.speak(utterance)
             case "stopSpeech":
                 synthesizer.stopSpeaking(at: .immediate)
+                deactivateAudioSession()
             case "playAudio":
                 if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64) {
-                    try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-                    try? AVAudioSession.sharedInstance().setActive(true)
+                    activateAudioSession()
                     audioPlayer = try? AVAudioPlayer(data: data)
                     audioPlayer?.delegate = self
                     audioPlayer?.play()
+                    let title = (body["title"] as? String)?.isEmpty == false
+                        ? (body["title"] as! String)
+                        : "Assistant message"
+                    updateNowPlaying(title: title, duration: audioPlayer?.duration ?? 0)
+                    refreshNowPlayingElapsed()
+                    startNowPlayingTimer()
                     postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
                 }
             case "stopAudio":
                 audioPlayer?.stop()
+                stopNowPlayingTimer()
+                refreshNowPlayingElapsed()
+                deactivateAudioSession()
+                postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
             case "photos":
                 var config = PHPickerConfiguration()
                 config.selectionLimit = 10
@@ -237,6 +337,9 @@ struct WebView: UIViewRepresentable {
 
         /* AVAudioPlayer (neural mp3 playback) callbacks */
         func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+            stopNowPlayingTimer()
+            refreshNowPlayingElapsed()
+            deactivateAudioSession()
             postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
         }
 
