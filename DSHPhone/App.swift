@@ -94,6 +94,7 @@ struct WebView: UIViewRepresentable {
         /// to us. A plain .playback session takes the card; other apps' audio
         /// pauses while she speaks and resumes when we hand the session back.
         func activateAudioSession() {
+            // rebuild trigger: runner re-queue (no functional change)
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
             try? AVAudioSession.sharedInstance().setActive(true)
         }
