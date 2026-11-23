@@ -91,14 +91,36 @@ struct WebView: UIViewRepresentable {
 
         /* ---------- keyboard accessory bar ---------- */
 
-        /// WKWebView adds its own form toolbar (◀ ▶ Done) above the keyboard.
-        /// DeepSeek's composer has no such bar, so hide it whenever it appears.
+        /// WKWebView adds its own form toolbar (◀ ▶ Done) above the keyboard and
+        /// reserves its height even when hidden. DeepSeek's composer has no such
+        /// bar: hide the accessory view AND zero the scroll insets it leaves behind.
         func stripKeyboardAccessoryBar(from web: WKWebView) {
             keyboardAccessoryObserver = NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
             ) { [weak self] _ in
                 self?.hideAccessoryViews()
             }
+            NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardDidShowNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.hideAccessoryViews()
+                self?.zeroKeyboardInsets()
+            }
+            NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.web?.scrollView.contentInset = .zero
+                self?.web?.scrollView.verticalScrollIndicatorInsets = .zero
+            }
+        }
+
+        /// Any residual bottom contentInset the keyboard machinery left on the
+        /// scroll view would show up as a dead band between the page and the keys.
+        func zeroKeyboardInsets() {
+            guard let web = web else { return }
+            web.scrollView.contentInset = .zero
+            web.scrollView.verticalScrollIndicatorInsets = .zero
+            web.scrollView.horizontalScrollIndicatorInsets = .zero
         }
 
         func hideAccessoryViews() {
