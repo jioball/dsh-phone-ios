@@ -367,6 +367,11 @@ struct WebView: UIViewRepresentable {
                 refreshNowPlayingElapsed()
                 deactivateAudioSession()
                 postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
+            case "savePhoto":
+                if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64), let image = UIImage(data: data) {
+                    UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+                    postNotice("Saved to Photos")
+                }
             case "photos":
                 var config = PHPickerConfiguration()
                 config.selectionLimit = 10
