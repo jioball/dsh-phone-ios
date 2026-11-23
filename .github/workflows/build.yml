@@ -9,6 +9,8 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    # generous limit: the 15m default killed a run that was still waiting for a runner
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
