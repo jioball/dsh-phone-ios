@@ -108,12 +108,30 @@ struct WebView: UIViewRepresentable {
             ) { [weak self] _ in
                 self?.hideAccessoryViews()
                 self?.zeroKeyboardInsets()
+                self?.forceFullHeight()
             }
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
             ) { [weak self] _ in
                 self?.web?.scrollView.contentInset = .zero
                 self?.web?.scrollView.verticalScrollIndicatorInsets = .zero
+            }
+        }
+
+        /// WebKit shrinks the webview by keyboard + accessory allowance; restore
+        /// the full height after the keyboard settles so the page's own
+        /// visualViewport math controls the composer position exactly.
+        func forceFullHeight() {
+            guard let web = web, let window = web.window else { return }
+            let target = window.bounds
+            for delay in [0.0, 0.15, 0.4] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let web = self?.web, let w = web.window else { return }
+                    if web.frame.size != w.bounds.size {
+                        web.frame = w.bounds
+                        web.layoutIfNeeded()
+                    }
+                }
             }
         }
 
