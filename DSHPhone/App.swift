@@ -56,12 +56,21 @@ func mimeFor(extension ext: String) -> String {
 
 @main
 struct DSHPhoneApp: App {
+    /* every layer behind the page must be the page's own colour: WKWebView is
+       non-opaque here, so an unset container shows iOS systemBackground (grey)
+       in any strip the page does not paint - the "black bar that turns grey". */
+    static let pageColor = Color(red: 0x11 / 255, green: 0x11 / 255, blue: 0x11 / 255)
+
     var body: some Scene {
         WindowGroup {
-            /* .keyboard: SwiftUI must NOT shrink the webview for the keyboard —
-               its avoidance subtracts the accessory-bar allowance and leaves a
-               dead band. The page positions its composer from visualViewport. */
-            WebView().ignoresSafeArea().ignoresSafeArea(.keyboard, edges: .bottom)
+            ZStack {
+                DSHPhoneApp.pageColor.ignoresSafeArea()
+                /* .keyboard: SwiftUI must NOT shrink the webview for the keyboard —
+                   its avoidance subtracts the accessory-bar allowance and leaves a
+                   dead band. The page positions its composer from visualViewport. */
+                WebView().ignoresSafeArea().ignoresSafeArea(.keyboard, edges: .bottom)
+            }
+            .background(DSHPhoneApp.pageColor.ignoresSafeArea())
         }
     }
 }
@@ -89,7 +98,11 @@ struct WebView: UIViewRepresentable {
         web.scrollView.alwaysBounceVertical = false  /* the chat list scrolls; never the shell */
         web.scrollView.keyboardDismissMode = .onDrag /* scroll gesture dismisses keyboard, doesn't drag it */
         web.isOpaque = false
-        web.backgroundColor = UIColor(red: 0.039, green: 0.039, blue: 0.047, alpha: 1)
+        /* match the page (#111111) on every background layer WKWebView owns */
+        let pageBG = UIColor(red: 0x11 / 255, green: 0x11 / 255, blue: 0x11 / 255, alpha: 1)
+        web.backgroundColor = pageBG
+        web.scrollView.backgroundColor = pageBG
+        web.underPageBackgroundColor = pageBG
         context.coordinator.web = web
         context.coordinator.stripKeyboardAccessoryBar(from: web)
         suppressKeyboardAccessory(in: web)
