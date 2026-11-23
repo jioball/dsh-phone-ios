@@ -89,13 +89,12 @@ struct WebView: UIViewRepresentable {
 
         /* ---------- audio session & Now Playing ---------- */
 
-        /// Playback session. NOTE: no .duckOthers — a ducking session is treated
-        /// like a notification sound and iOS will NOT switch the Now Playing card
-        /// to us. A plain .playback session takes the card; other apps' audio
-        /// pauses while she speaks and resumes when we hand the session back.
-        func activateAudioSession() {
-            // rebuild trigger: runner re-queue (no functional change)
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+        /// Playback session. duck=true → .duckOthers (other audio dips, but iOS
+        /// will NOT give us the Now Playing card). duck=false → plain .playback
+        /// (card + controls are ours; other apps' audio pauses instead).
+        func activateAudioSession(duck: Bool) {
+            let options: AVAudioSession.CategoryOptions = duck ? [.duckOthers] : []
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: options)
             try? AVAudioSession.sharedInstance().setActive(true)
         }
 
@@ -231,14 +230,15 @@ struct WebView: UIViewRepresentable {
                 }
                 utterance.rate = AVSpeechUtteranceDefaultSpeechRate * (body["rate"] as? Float ?? 1.05)
                 utterance.pitchMultiplier = body["pitch"] as? Float ?? 1.0
-                activateAudioSession()
+                activateAudioSession(duck: true)
                 synthesizer.speak(utterance)
             case "stopSpeech":
                 synthesizer.stopSpeaking(at: .immediate)
                 deactivateAudioSession()
             case "playAudio":
                 if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64) {
-                    activateAudioSession()
+                    let duck = body["duck"] as? Bool ?? false
+                    activateAudioSession(duck: duck)
                     audioPlayer = try? AVAudioPlayer(data: data)
                     audioPlayer?.delegate = self
                     audioPlayer?.play()
@@ -249,7 +249,14 @@ struct WebView: UIViewRepresentable {
                     updateNowPlaying(title: title, duration: duration)
                     refreshNowPlayingElapsed()
                     startNowPlayingTimer()
-                    postNotice("🎧 Now Playing: \(title.prefix(60)) · \(String(format: "%.1f", duration))s")
+                    postNotice("🎧 Now Playing: \(title.prefix(60)) · \(String(format: "%.1f", duration))s · duck=\(duck)")
+                    /* re-assert metadata shortly after playback settles — something
+                       (often the webview) can clear it right at session activation */
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                        guard let self, self.audioPlayer?.isPlaying == true else { return }
+                        self.updateNowPlaying(title: title, duration: duration)
+                        self.refreshNowPlayingElapsed()
+                    }
                     postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
                 }
             case "stopAudio":
