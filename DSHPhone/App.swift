@@ -59,7 +59,7 @@ struct DSHPhoneApp: App {
     /* every layer behind the page must be the page's own colour: WKWebView is
        non-opaque here, so an unset container shows iOS systemBackground (grey)
        in any strip the page does not paint - the "black bar that turns grey". */
-    static let pageColor = Color(red: 0x11 / 255, green: 0x11 / 255, blue: 0x11 / 255)
+    static let pageColor = Color(red: 17.0 / 255.0, green: 17.0 / 255.0, blue: 17.0 / 255.0)
 
     var body: some Scene {
         WindowGroup {
@@ -99,7 +99,7 @@ struct WebView: UIViewRepresentable {
         web.scrollView.keyboardDismissMode = .onDrag /* scroll gesture dismisses keyboard, doesn't drag it */
         web.isOpaque = false
         /* match the page (#111111) on every background layer WKWebView owns */
-        let pageBG = UIColor(red: 0x11 / 255, green: 0x11 / 255, blue: 0x11 / 255, alpha: 1)
+        let pageBG = UIColor(red: 17.0 / 255.0, green: 17.0 / 255.0, blue: 17.0 / 255.0, alpha: 1.0)
         web.backgroundColor = pageBG
         web.scrollView.backgroundColor = pageBG
         web.underPageBackgroundColor = pageBG
