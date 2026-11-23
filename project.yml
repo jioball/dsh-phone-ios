@@ -20,8 +20,8 @@ targets:
       path: DSHPhone/Info.plist
       properties:
         CFBundleDisplayName: DSH phone
-        CFBundleShortVersionString: "0.3.5"
-        CFBundleVersion: "8"
+        CFBundleShortVersionString: "0.3.6"
+        CFBundleVersion: "9"
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]

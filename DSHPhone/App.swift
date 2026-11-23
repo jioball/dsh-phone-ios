@@ -89,10 +89,12 @@ struct WebView: UIViewRepresentable {
 
         /* ---------- audio session & Now Playing ---------- */
 
-        /// Playback session that DUCKS other apps' audio (music/video/PiP keep
-        /// playing quietly while the assistant speaks, then resume at full volume).
+        /// Playback session. NOTE: no .duckOthers — a ducking session is treated
+        /// like a notification sound and iOS will NOT switch the Now Playing card
+        /// to us. A plain .playback session takes the card; other apps' audio
+        /// pauses while she speaks and resumes when we hand the session back.
         func activateAudioSession() {
-            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
             try? AVAudioSession.sharedInstance().setActive(true)
         }
 
@@ -105,12 +107,14 @@ struct WebView: UIViewRepresentable {
             center.playCommand.isEnabled = true
             center.playCommand.addTarget { [weak self] _ in
                 self?.audioPlayer?.play()
+                self?.postNotice("⏯ lock-screen: play")
                 self?.postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
                 return .success
             }
             center.pauseCommand.isEnabled = true
             center.pauseCommand.addTarget { [weak self] _ in
                 self?.audioPlayer?.pause()
+                self?.postNotice("⏯ lock-screen: pause")
                 self?.postJS("window.__phoneTtsState && window.__phoneTtsState('pause')")
                 return .success
             }
@@ -240,9 +244,11 @@ struct WebView: UIViewRepresentable {
                     let title = (body["title"] as? String)?.isEmpty == false
                         ? (body["title"] as! String)
                         : "Assistant message"
-                    updateNowPlaying(title: title, duration: audioPlayer?.duration ?? 0)
+                    let duration = audioPlayer?.duration ?? 0
+                    updateNowPlaying(title: title, duration: duration)
                     refreshNowPlayingElapsed()
                     startNowPlayingTimer()
+                    postNotice("🎧 Now Playing: \(title.prefix(60)) · \(String(format: "%.1f", duration))s")
                     postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
                 }
             case "stopAudio":
