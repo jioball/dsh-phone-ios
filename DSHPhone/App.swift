@@ -65,6 +65,7 @@ struct WebView: UIViewRepresentable {
         web.isOpaque = false
         web.backgroundColor = UIColor(red: 0.039, green: 0.039, blue: 0.047, alpha: 1)
         context.coordinator.web = web
+        context.coordinator.stripKeyboardAccessoryBar(from: web)
         web.load(URLRequest(url: PHONE_URL))
         return web
     }
@@ -80,6 +81,7 @@ struct WebView: UIViewRepresentable {
         let synthesizer = AVSpeechSynthesizer()
         var audioPlayer: AVAudioPlayer?
         var nowPlayingTimer: Timer?
+        var keyboardAccessoryObserver: NSObjectProtocol?
 
         override init() {
             super.init()
@@ -87,7 +89,40 @@ struct WebView: UIViewRepresentable {
             setupRemoteCommands()
         }
 
-        /* ---------- audio session & Now Playing ---------- */
+        /* ---------- keyboard accessory bar ---------- */
+
+        /// WKWebView adds its own form toolbar (◀ ▶ Done) above the keyboard.
+        /// DeepSeek's composer has no such bar, so hide it whenever it appears.
+        func stripKeyboardAccessoryBar(from web: WKWebView) {
+            keyboardAccessoryObserver = NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.hideAccessoryViews()
+            }
+        }
+
+        func hideAccessoryViews() {
+            for scene in UIApplication.shared.connectedScenes {
+                guard let ws = scene as? UIWindowScene else { continue }
+                for window in ws.windows { hideAccessoryViews(in: window) }
+            }
+        }
+
+        func hideAccessoryViews(in view: UIView) {
+            let name = String(describing: type(of: view))
+            if name.contains("InputAccessory") || name.contains("AccessoryView"),
+               view.frame.height > 0, view.frame.height < 90 {
+                view.isHidden = true
+                return
+            }
+            for sub in view.subviews { hideAccessoryViews(in: sub) }
+        }
+
+        deinit {
+            if let observer = keyboardAccessoryObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
 
         /// Playback session. duck=true → .duckOthers (other audio dips, but iOS
         /// will NOT give us the Now Playing card). duck=false → plain .playback
