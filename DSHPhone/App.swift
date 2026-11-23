@@ -35,7 +35,10 @@ func mimeFor(extension ext: String) -> String {
 struct DSHPhoneApp: App {
     var body: some Scene {
         WindowGroup {
-            WebView().ignoresSafeArea()
+            /* .keyboard: SwiftUI must NOT shrink the webview for the keyboard —
+               its avoidance subtracts the accessory-bar allowance and leaves a
+               dead band. The page positions its composer from visualViewport. */
+            WebView().ignoresSafeArea().ignoresSafeArea(.keyboard, edges: .bottom)
         }
     }
 }
