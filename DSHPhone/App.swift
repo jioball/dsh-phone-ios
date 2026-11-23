@@ -318,6 +318,12 @@ struct WebView: UIViewRepresentable {
         /// Advertise native playback capability once the page is up.
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             webView.evaluateJavaScript("window.__phoneHasPlayAudio = true;", completionHandler: nil)
+            /* report the installed IPA so the phone can announce a newer build */
+            let info = Bundle.main.infoDictionary ?? [:]
+            let version = info["CFBundleShortVersionString"] as? String ?? "0"
+            let build = info["CFBundleVersion"] as? String ?? "0"
+            let js = "window.__phoneAppVersion && window.__phoneAppVersion('\(version)', '\(build)');"
+            webView.evaluateJavaScript(js, completionHandler: nil)
         }
 
         /// JS: window.webkit.messageHandlers.phone.postMessage({ kind: "photos" | "documents" })
@@ -384,6 +390,10 @@ struct WebView: UIViewRepresentable {
                 refreshNowPlayingElapsed()
                 deactivateAudioSession()
                 postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
+            case "openURL":
+                if let s = body["url"] as? String, let url = URL(string: s) {
+                    UIApplication.shared.open(url)
+                }
             case "savePhoto":
                 if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64), let image = UIImage(data: data) {
                     UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
