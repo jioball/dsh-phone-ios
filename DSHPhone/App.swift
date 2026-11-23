@@ -4,6 +4,29 @@ import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
 import MediaPlayer
+import ObjectiveC
+
+/// WKWebView subclass that refuses a keyboard input accessory: WebKit then
+/// neither draws its ◀ ▶ Done bar nor reserves the ~44pt it occupies.
+final class NoAccessoryWebView: WKWebView {
+    override var inputAccessoryView: UIView? { nil }
+}
+
+/// Swizzle helper: makes the internal WKContentView's inputAccessoryView nil.
+private final class AccessoryNilHelper: NSObject {
+    @objc var inputAccessoryView: UIView? { nil }
+}
+
+func suppressKeyboardAccessory(in web: WKWebView) {
+    guard let content = web.scrollView.subviews.first(where: {
+        String(describing: type(of: $0)).hasPrefix("WKContent")
+    }) else { return }
+    let cls: AnyClass = type(of: content)
+    guard let original = class_getInstanceMethod(cls, Selector(("inputAccessoryView"))),
+          let swizzled = class_getInstanceMethod(AccessoryNilHelper.self, Selector(("inputAccessoryView")))
+    else { return }
+    method_exchangeImplementations(original, swizzled)
+}
 
 /// URL of the dsh-phone PWA served by the DSH host plugin.
 let PHONE_URL = URL(string: "https://babel.tail977397.ts.net:8443/")!
@@ -59,7 +82,7 @@ struct WebView: UIViewRepresentable {
             )
             config.userContentController.addUserScript(script)
         }
-        let web = WKWebView(frame: .zero, configuration: config)
+        let web = NoAccessoryWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
         web.allowsBackForwardNavigationGestures = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
@@ -69,6 +92,7 @@ struct WebView: UIViewRepresentable {
         web.backgroundColor = UIColor(red: 0.039, green: 0.039, blue: 0.047, alpha: 1)
         context.coordinator.web = web
         context.coordinator.stripKeyboardAccessoryBar(from: web)
+        suppressKeyboardAccessory(in: web)
         web.load(URLRequest(url: PHONE_URL))
         return web
     }
