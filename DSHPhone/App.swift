@@ -92,6 +92,10 @@ struct WebView: UIViewRepresentable {
             config.userContentController.addUserScript(script)
         }
         let web = NoAccessoryWebView(frame: .zero, configuration: config)
+        if #available(iOS 16.4, *) {
+            /* lets ios_webkit_debug_proxy / Inspect.app attach to the live app */
+            web.isInspectable = true
+        }
         web.navigationDelegate = context.coordinator
         web.allowsBackForwardNavigationGestures = false
         web.scrollView.contentInsetAdjustmentBehavior = .never
