@@ -128,6 +128,9 @@ struct WebView: UIViewRepresentable {
         weak var web: WKWebView?
         let synthesizer = AVSpeechSynthesizer()
         var audioPlayer: AVAudioPlayer?
+        var audioRecorder: AVAudioRecorder?
+        var recordingURL: URL?
+        var recordingCancelled = false
         var nowPlayingTimer: Timer?
         var keyboardAccessoryObserver: NSObjectProtocol?
 
@@ -394,6 +397,14 @@ struct WebView: UIViewRepresentable {
                 refreshNowPlayingElapsed()
                 deactivateAudioSession()
                 postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
+            case "startRec":
+                /* native voice recording: inherits the process's mic grant, so
+                   no per-session prompt (webview getUserMedia prompts every run) */
+                startNativeRecording()
+            case "stopRec":
+                stopNativeRecording()
+            case "cancelRec":
+                cancelNativeRecording()
             case "openURL":
                 if let s = body["url"] as? String, let url = URL(string: s) {
                     UIApplication.shared.open(url)
@@ -493,6 +504,65 @@ struct WebView: UIViewRepresentable {
             refreshNowPlayingElapsed()
             deactivateAudioSession()
             postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
+        }
+
+        /* ---------- native voice recording (16 kHz mono PCM16 WAV) ---------- */
+        func startNativeRecording() {
+            let session = AVAudioSession.sharedInstance()
+            session.requestRecordPermission { [weak self] granted in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if !granted {
+                        self.postJS("window.__phoneRecError && window.__phoneRecError('denied')")
+                        return
+                    }
+                    do {
+                        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .mixWithOthers])
+                        try session.setActive(true)
+                    } catch {}
+                    let dir = FileManager.default.temporaryDirectory
+                    let url = dir.appendingPathComponent("rec-\(UUID().uuidString).wav")
+                    let settings: [String: Any] = [
+                        AVFormatIDKey: Int(kAudioFormatLinearPCM),
+                        AVSampleRateKey: 16000,
+                        AVNumberOfChannelsKey: 1,
+                        AVLinearPCMBitDepthKey: 16,
+                        AVLinearPCMIsBigEndianKey: false,
+                        AVLinearPCMIsFloatKey: false,
+                    ]
+                    self.recordingCancelled = false
+                    self.recordingURL = url
+                    self.audioRecorder = try? AVAudioRecorder(url: url, settings: settings)
+                    self.audioRecorder?.record()
+                    self.postJS("window.__phoneRecState && window.__phoneRecState('start')")
+                }
+            }
+        }
+
+        func stopNativeRecording() {
+            guard let recorder = audioRecorder else { return }
+            recorder.stop()
+            audioRecorder = nil
+            let url = recordingURL
+            recordingURL = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self else { return }
+                if self.recordingCancelled { self.recordingCancelled = false; return }
+                if let url, let data = try? Data(contentsOf: url) {
+                    let b64 = data.base64EncodedString()
+                    self.postJS("window.__phoneAudio && window.__phoneAudio('\(b64)')")
+                } else {
+                    self.postJS("window.__phoneRecError && window.__phoneRecError('empty')")
+                }
+            }
+        }
+
+        func cancelNativeRecording() {
+            recordingCancelled = true
+            audioRecorder?.stop()
+            audioRecorder = nil
+            recordingURL = nil
+            postJS("window.__phoneRecState && window.__phoneRecState('end')")
         }
 
         func postFiles(_ files: [[String: Any]], kind: String) {
