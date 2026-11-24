@@ -56,6 +56,10 @@ func mimeFor(extension ext: String) -> String {
 
 @main
 struct DSHPhoneApp: App {
+    init() {
+        /* the shake gesture pops iOS's Cancel/Undo menu over the webview - off */
+        UIApplication.shared.applicationSupportsShakeToEdit = false
+    }
     /* every layer behind the page must be the page's own colour: WKWebView is
        non-opaque here, so an unset container shows iOS systemBackground (grey)
        in any strip the page does not paint - the "black bar that turns grey". */
