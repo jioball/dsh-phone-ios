@@ -652,6 +652,10 @@ struct WebView: UIViewRepresentable {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let type = obj["type"] as? String, type == "voice",
                   let rel = obj["url"] as? String else { return }
+            /* never double-start while something is already playing: the webview
+               may have begun auto-read the instant before the lock froze it, and
+               a second AVAudioPlayer on top would restart + cut long replies */
+            if audioPlayer?.isPlaying == true { return }
             let vid = obj["id"] as? String
             /* the plugin's ack-retry re-sends the same id: never play it twice */
             if let vid, vid == lastVoiceId { return }
