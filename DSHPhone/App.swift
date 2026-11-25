@@ -139,6 +139,7 @@ struct WebView: UIViewRepresentable {
         var liveChannelURL: URL?
         var liveChannelTask: URLSessionWebSocketTask?
         var liveChannelAttempts = 0
+        var lastVoiceId: String?
         var lastVisible = true
         var keepAliveOn = false
         var keepAlivePlayer: AVAudioPlayer?
@@ -647,13 +648,16 @@ struct WebView: UIViewRepresentable {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let type = obj["type"] as? String, type == "voice",
                   let rel = obj["url"] as? String else { return }
+            let vid = obj["id"] as? String
+            /* the plugin's ack-retry re-sends the same id: never play it twice */
+            if let vid, vid == lastVoiceId { return }
             let title = (obj["title"] as? String)?.isEmpty == false
                 ? (obj["title"] as! String)
                 : "Assistant message"
             /* while the page is alive it plays auto-read itself; we only take
                over when the webview is frozen (locked) */
             if lastVisible { return }
-            downloadAndPlay(relative: rel, title: title)
+            downloadAndPlay(relative: rel, title: title, voiceId: vid)
         }
 
         func scheduleLiveReconnect() {
@@ -664,7 +668,10 @@ struct WebView: UIViewRepresentable {
             }
         }
 
-        func downloadAndPlay(relative rel: String, title: String) {
+        func downloadAndPlay(relative rel: String, title: String, voiceId: String?) {
+            /* dedupe stands even if the download below fails: a retry of this
+               id must never start a second playback */
+            if let voiceId { lastVoiceId = voiceId }
             guard let channelURL = liveChannelURL else { return }
             /* derive the origin from the channel URL (strip path + query) */
             var comps = URLComponents(url: channelURL, resolvingAgainstBaseURL: false)
@@ -681,6 +688,7 @@ struct WebView: UIViewRepresentable {
                     self.audioPlayer = try? AVAudioPlayer(data: data)
                     self.audioPlayer?.delegate = self
                     self.audioPlayer?.play()
+                    if let voiceId { self.sendVoiceAck(voiceId) }
                     let duration = self.audioPlayer?.duration ?? 0
                     self.updateNowPlaying(title: title, duration: duration)
                     self.refreshNowPlayingElapsed()
@@ -688,6 +696,14 @@ struct WebView: UIViewRepresentable {
                     self.postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
                 }
             }.resume()
+        }
+
+        /// Tell the host the audio actually started, so its retry loop can stand down.
+        func sendVoiceAck(_ id: String) {
+            let ack: [String: Any] = ["type": "voice-ack", "id": id]
+            guard let data = try? JSONSerialization.data(withJSONObject: ack),
+                  let json = String(data: data, encoding: .utf8) else { return }
+            liveChannelTask?.send(.string(json)) { _ in }
         }
 
         /* ---------- silent keepalive: stops iOS suspending us in background ---------- */
