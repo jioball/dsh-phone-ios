@@ -623,20 +623,24 @@ struct WebView: UIViewRepresentable {
             let task = URLSession.shared.webSocketTask(with: url)
             liveChannelTask = task
             task.resume()
-            receiveLive()
+            receiveLive(task)
         }
 
-        func receiveLive() {
-            guard let task = liveChannelTask else { return }
+        func receiveLive(_ task: URLSessionWebSocketTask? = nil) {
+            guard let task = task ?? liveChannelTask else { return }
             task.receive { [weak self] result in
                 DispatchQueue.main.async {
+                    /* stale-task guard: a task we cancelled (or replaced) must not
+                       trigger reconnects - otherwise every openLiveChannel kills a
+                       healthy socket, whose failure schedules the next open, forever */
+                    guard let self, self.liveChannelTask === task else { return }
                     switch result {
                     case .success(let message):
-                        self?.liveChannelAttempts = 0
-                        self?.handleLive(message)
-                        self?.receiveLive()
+                        self.liveChannelAttempts = 0
+                        self.handleLive(message)
+                        self.receiveLive(task)
                     case .failure:
-                        self?.scheduleLiveReconnect()
+                        self.scheduleLiveReconnect()
                     }
                 }
             }
