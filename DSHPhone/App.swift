@@ -134,10 +134,33 @@ struct WebView: UIViewRepresentable {
         var nowPlayingTimer: Timer?
         var keyboardAccessoryObserver: NSObjectProtocol?
 
+        /* ---------- native voice channel (locked-phone read-aloud) ---------- */
+        var liveChannelEnabled = false
+        var liveChannelURL: URL?
+        var liveChannelTask: URLSessionWebSocketTask?
+        var liveChannelAttempts = 0
+        var lastVisible = true
+        var keepAliveOn = false
+        var keepAlivePlayer: AVAudioPlayer?
+        var keepAliveURL: URL?
+        var isBackground = false
+
         override init() {
             super.init()
             synthesizer.delegate = self
             setupRemoteCommands()
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.isBackground = true
+                self?.startKeepAliveIfNeeded()
+            }
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                self?.isBackground = false
+                self?.stopKeepAlive()
+            }
         }
 
         /* ---------- keyboard accessory bar ---------- */
@@ -405,6 +428,30 @@ struct WebView: UIViewRepresentable {
                 stopNativeRecording()
             case "cancelRec":
                 cancelNativeRecording()
+            case "liveChannel":
+                /* the page hands us the host channel URL; we keep our own socket
+                   so reply audio still arrives while the webview is frozen */
+                let enabled = body["enabled"] as? Bool ?? false
+                liveChannelEnabled = enabled
+                if let urlString = body["url"] as? String, let url = URL(string: urlString) {
+                    liveChannelURL = url
+                }
+                liveChannelAttempts = 0
+                if enabled {
+                    openLiveChannel()
+                } else {
+                    liveChannelTask?.cancel(with: .goingAway, reason: nil)
+                    liveChannelTask = nil
+                }
+            case "visibility":
+                lastVisible = body["visible"] as? Bool ?? true
+            case "keepAlive":
+                keepAliveOn = body["on"] as? Bool ?? false
+                if keepAliveOn {
+                    startKeepAliveIfNeeded()
+                } else {
+                    stopKeepAlive()
+                }
             case "openURL":
                 if let s = body["url"] as? String, let url = URL(string: s) {
                     UIApplication.shared.open(url)
@@ -504,6 +551,8 @@ struct WebView: UIViewRepresentable {
             refreshNowPlayingElapsed()
             deactivateAudioSession()
             postJS("window.__phoneTtsState && window.__phoneTtsState('end')")
+            /* keep the process awake between replies while locked */
+            if keepAliveOn && isBackground { startKeepAliveIfNeeded() }
         }
 
         /* ---------- native voice recording (16 kHz mono PCM16 WAV) ---------- */
@@ -563,6 +612,127 @@ struct WebView: UIViewRepresentable {
             audioRecorder = nil
             recordingURL = nil
             postJS("window.__phoneRecState && window.__phoneRecState('end')")
+        }
+
+        /* ---------- native voice channel: locked-phone read-aloud ---------- */
+
+        func openLiveChannel() {
+            guard liveChannelEnabled, let url = liveChannelURL else { return }
+            liveChannelTask?.cancel(with: .goingAway, reason: nil)
+            let task = URLSession.shared.webSocketTask(with: url)
+            liveChannelTask = task
+            task.resume()
+            receiveLive()
+        }
+
+        func receiveLive() {
+            guard let task = liveChannelTask else { return }
+            task.receive { [weak self] result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let message):
+                        self?.liveChannelAttempts = 0
+                        self?.handleLive(message)
+                        self?.receiveLive()
+                    case .failure:
+                        self?.scheduleLiveReconnect()
+                    }
+                }
+            }
+        }
+
+        func handleLive(_ message: URLSessionWebSocketTask.Message) {
+            guard case .string(let text) = message,
+                  let data = text.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = obj["type"] as? String, type == "voice",
+                  let rel = obj["url"] as? String else { return }
+            let title = (obj["title"] as? String)?.isEmpty == false
+                ? (obj["title"] as! String)
+                : "Assistant message"
+            /* while the page is alive it plays auto-read itself; we only take
+               over when the webview is frozen (locked) */
+            if lastVisible { return }
+            downloadAndPlay(relative: rel, title: title)
+        }
+
+        func scheduleLiveReconnect() {
+            guard liveChannelEnabled, liveChannelAttempts < 20 else { return }
+            liveChannelAttempts += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.openLiveChannel()
+            }
+        }
+
+        func downloadAndPlay(relative rel: String, title: String) {
+            guard let channelURL = liveChannelURL else { return }
+            /* derive the origin from the channel URL (strip path + query) */
+            var comps = URLComponents(url: channelURL, resolvingAgainstBaseURL: false)
+            comps?.path = ""
+            comps?.query = nil
+            comps?.fragment = nil
+            guard let origin = comps?.url,
+                  let audioURL = URL(string: rel, relativeTo: origin)?.absoluteURL else { return }
+            URLSession.shared.dataTask(with: audioURL) { [weak self] data, _, error in
+                DispatchQueue.main.async {
+                    guard let self, error == nil, let data = data, !data.isEmpty else { return }
+                    self.stopKeepAlive()  /* real audio replaces the silence */
+                    self.activateAudioSession(duck: false)
+                    self.audioPlayer = try? AVAudioPlayer(data: data)
+                    self.audioPlayer?.delegate = self
+                    self.audioPlayer?.play()
+                    let duration = self.audioPlayer?.duration ?? 0
+                    self.updateNowPlaying(title: title, duration: duration)
+                    self.refreshNowPlayingElapsed()
+                    self.startNowPlayingTimer()
+                    self.postJS("window.__phoneTtsState && window.__phoneTtsState('start')")
+                }
+            }.resume()
+        }
+
+        /* ---------- silent keepalive: stops iOS suspending us in background ---------- */
+
+        func startKeepAliveIfNeeded() {
+            guard keepAliveOn, isBackground, keepAlivePlayer == nil else { return }
+            guard let url = makeSilenceWAV() else { return }
+            keepAliveURL = url
+            activateAudioSession(duck: true)
+            keepAlivePlayer = try? AVAudioPlayer(contentsOf: url)
+            keepAlivePlayer?.numberOfLoops = -1
+            keepAlivePlayer?.volume = 0.0
+            keepAlivePlayer?.play()
+        }
+
+        func stopKeepAlive() {
+            keepAlivePlayer?.stop()
+            keepAlivePlayer = nil
+            if let url = keepAliveURL {
+                try? FileManager.default.removeItem(at: url)
+                keepAliveURL = nil
+            }
+        }
+
+        /// 1 second of 16 kHz mono PCM16 silence, WAV format.
+        func makeSilenceWAV() -> URL? {
+            let sampleRate = 16000
+            let samples = sampleRate /* 1 second */
+            var data = Data()
+            func appendAscii(_ str: String) { data.append(str.data(using: .ascii)!) }
+            func appendU32(_ v: UInt32) { var le = v.littleEndian; withUnsafeBytes(of: &le) { data.append(contentsOf: $0) } }
+            func appendU16(_ v: UInt16) { var le = v.littleEndian; withUnsafeBytes(of: &le) { data.append(contentsOf: $0) } }
+            appendAscii("RIFF"); appendU32(UInt32(36 + samples * 2)); appendAscii("WAVE")
+            appendAscii("fmt "); appendU32(16); appendU16(1); appendU16(1)
+            appendU32(UInt32(sampleRate)); appendU32(UInt32(sampleRate * 2)); appendU16(2); appendU16(16)
+            appendAscii("data"); appendU32(UInt32(samples * 2))
+            data.append(Data(count: samples * 2)) /* all zero bytes */
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("keepalive-\(UUID().uuidString).wav")
+            do {
+                try data.write(to: url)
+                return url
+            } catch {
+                return nil
+            }
         }
 
         func postFiles(_ files: [[String: Any]], kind: String) {
