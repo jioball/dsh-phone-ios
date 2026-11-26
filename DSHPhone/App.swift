@@ -696,7 +696,7 @@ struct WebView: UIViewRepresentable {
                     UIApplication.shared.open(url)
                     scheduleInstallExitIfNeeded(s)
                 }
-            case "quitAfter": {
+            case "quitAfter":
                 /* the update flow can hand the install URL to an iOS Shortcut
                    instead of this app, so no install URL ever arrives here.
                    The page asks for an explicit, delayed, once-only quit. */
@@ -705,8 +705,7 @@ struct WebView: UIViewRepresentable {
                 else if let d = body["ms"] as? Double { rawMs = Int(d) }
                 else if let n = body["ms"] as? NSNumber { rawMs = n.intValue }
                 else { rawMs = 1500 }
-                scheduleQuit(afterMs: max(200, min(10000, rawMs)))
-            }
+                self.scheduleQuit(afterMs: max(200, min(10000, rawMs)))
             case "savePhoto":
                 if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64), let image = UIImage(data: data) {
                     UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
