@@ -1,4 +1,4 @@
-name: DSHPhone
+﻿name: DSHPhone
 options:
   bundleIdPrefix: com.samuel
   deploymentTarget:
