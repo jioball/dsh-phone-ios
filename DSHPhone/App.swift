@@ -81,7 +81,7 @@ struct DSHPhoneApp: App {
             .onOpenURL { url in
                 guard url.scheme?.lowercased() == "dshphone" else { return }
                 if url.host?.lowercased() == "quit" {
-                    exit(0)
+                    WebView.AppLink.quit()
                 }
             }
         }
@@ -89,6 +89,22 @@ struct DSHPhoneApp: App {
 }
 
 struct WebView: UIViewRepresentable {
+    /* App-level URL handling (dshphone://quit) runs outside the Coordinator, so
+       the live webview is reachable through this weak holder. The quit itself
+       is guarded and delayed briefly so the "closing" overlay paints first. */
+    enum AppLink {
+        static weak var webView: WKWebView?
+        static var quitScheduled = false
+
+        static func quit() {
+            guard !quitScheduled else { return }
+            quitScheduled = true
+            let js = "(function(){try{var d=document.createElement('div');d.style.cssText='position:fixed;inset:0;z-index:99999;background:#0b0b0d;color:#eee;display:flex;align-items:center;justify-content:center;font:600 16px -apple-system,system-ui,sans-serif';d.textContent='Closing to install\\u2026';document.body.appendChild(d)}catch(e){}})()"
+            webView?.evaluateJavaScript(js)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
+        }
+    }
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
@@ -121,6 +137,7 @@ struct WebView: UIViewRepresentable {
         web.scrollView.backgroundColor = pageBG
         web.underPageBackgroundColor = pageBG
         context.coordinator.web = web
+        WebView.AppLink.webView = web
         context.coordinator.stripKeyboardAccessoryBar(from: web)
         suppressKeyboardAccessory(in: web)
         web.load(URLRequest(url: PHONE_URL))
