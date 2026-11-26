@@ -1,4 +1,4 @@
-﻿name: DSHPhone
+name: DSHPhone
 options:
   bundleIdPrefix: com.samuel
   deploymentTarget:
@@ -21,8 +21,11 @@ targets:
       path: DSHPhone/Info.plist
       properties:
         CFBundleDisplayName: DSH phone
-        CFBundleShortVersionString: "0.5.11"
-        CFBundleVersion: "31"
+        CFBundleShortVersionString: "0.5.12"
+        CFBundleVersion: "32"
+        CFBundleURLTypes:
+          - CFBundleURLName: com.samuel.dshphone
+            CFBundleURLSchemes: [dshphone]
         NSPhotoLibraryAddUsageDescription: "Save diagrams and images from your assistant."
         UILaunchScreen: {}
         UIBackgroundModes: [audio]

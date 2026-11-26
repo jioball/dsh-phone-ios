@@ -75,6 +75,15 @@ struct DSHPhoneApp: App {
                 WebView().ignoresSafeArea().ignoresSafeArea(.keyboard, edges: .bottom)
             }
             .background(DSHPhoneApp.pageColor.ignoresSafeArea())
+            /* dshphone://quit — an exact, schedulable self-termination for the
+               update shortcut: Open URL quit, Wait 2s, Open URL the install link.
+               Kept inert otherwise; the auto-quit on the install URL stays. */
+            .onOpenURL { url in
+                guard url.scheme?.lowercased() == "dshphone" else { return }
+                if url.host?.lowercased() == "quit" {
+                    exit(0)
+                }
+            }
         }
     }
 }
