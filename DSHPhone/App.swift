@@ -615,6 +615,12 @@ struct WebView: UIViewRepresentable {
             case "openURL":
                 if let s = body["url"] as? String, let url = URL(string: s) {
                     UIApplication.shared.open(url)
+                    scheduleInstallExitIfNeeded(s)
+                }
+            case "installAndClose":
+                if let s = body["url"] as? String, let url = URL(string: s) {
+                    UIApplication.shared.open(url)
+                    scheduleInstallExitIfNeeded(s)
                 }
             case "savePhoto":
                 if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64), let image = UIImage(data: data) {
@@ -692,6 +698,21 @@ struct WebView: UIViewRepresentable {
 
         func postNotice(_ text: String) {
             postJS("window.__phoneNotice && window.__phoneNotice(\(Self.jsString(text)))")
+        }
+
+        /* LiveContainer cannot replace a guest that is still running. When an
+           install URL is fired, show a brief notice and quit so the host can
+           finish the install (it keeps running in multitask mode). */
+        private static var installExitScheduled = false
+
+        func scheduleInstallExitIfNeeded(_ urlString: String) {
+            guard urlString.hasPrefix("livecontainer://install") else { return }
+            guard !Self.installExitScheduled else { return }
+            Self.installExitScheduled = true
+            postJS("(function(){try{var d=document.createElement('div');d.style.cssText='position:fixed;inset:0;z-index:99999;background:#0b0b0d;color:#eee;display:flex;align-items:center;justify-content:center;font:600 16px -apple-system,system-ui,sans-serif';d.textContent='Closing to install\\u2026';document.body.appendChild(d)}catch(e){}})()")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                exit(0)
+            }
         }
 
         /* AVSpeechSynthesizer callbacks → tell the page when playback starts/ends */

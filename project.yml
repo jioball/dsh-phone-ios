@@ -21,8 +21,8 @@ targets:
       path: DSHPhone/Info.plist
       properties:
         CFBundleDisplayName: DSH phone
-        CFBundleShortVersionString: "0.5.7"
-        CFBundleVersion: "27"
+        CFBundleShortVersionString: "0.5.9"
+        CFBundleVersion: "29"
         NSPhotoLibraryAddUsageDescription: "Save diagrams and images from your assistant."
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
