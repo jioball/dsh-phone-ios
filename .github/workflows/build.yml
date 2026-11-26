@@ -35,8 +35,8 @@ jobs:
       - name: Publish release (direct install URL)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.18-build${{ github.run_number }}
-          name: dsh-phone v0.5.18 (build ${{ github.run_number }})
+          tag_name: v0.5.19-build${{ github.run_number }}
+          name: dsh-phone v0.5.19 (build ${{ github.run_number }})
           files: DSHPhone-unsigned.ipa
           draft: false
           prerelease: false
