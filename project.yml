@@ -21,8 +21,8 @@ targets:
       path: DSHPhone/Info.plist
       properties:
         CFBundleDisplayName: DSH phone
-        CFBundleShortVersionString: "0.5.15"
-        CFBundleVersion: "35"
+        CFBundleShortVersionString: "0.5.16"
+        CFBundleVersion: "36"
         CFBundleURLTypes:
           - CFBundleURLName: com.samuel.dshphone
             CFBundleURLSchemes: [dshphone]
