@@ -454,7 +454,54 @@ struct WebView: UIViewRepresentable {
 
         /// Reload if iOS kills the web content process (memory pressure).
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            webView.load(URLRequest(url: PHONE_URL))
+            print("[DSH] web content process terminated - reloading")
+            reloadAfterContentDeath(webView, reason: "content-process-terminated")
+        }
+
+        /* ---------- webview crash recovery (black-screen root fix) ---------- */
+
+        var webHeartbeatTimer: Timer?
+        var heartbeatFails = 0
+        var lastHeartbeatReloadAt: Date?
+
+        /// The WKWebView's own JS context is the only reliable liveness probe:
+        /// if it cannot evaluate "1", the renderer is dead even though the
+        /// native layer still draws a black rectangle.
+        func startWebHeartbeat() {
+            webHeartbeatTimer?.invalidate()
+            heartbeatFails = 0
+            webHeartbeatTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+                guard let self, let web = self.web else { return }
+                web.evaluateJavaScript("1") { _, error in
+                    if error == nil {
+                        self.heartbeatFails = 0
+                    } else {
+                        self.heartbeatFails += 1
+                        print("[DSH] heartbeat fail \(self.heartbeatFails): \(String(describing: error))")
+                        if self.heartbeatFails >= 2 {
+                            self.heartbeatFails = 0
+                            self.reloadAfterContentDeath(web, reason: "heartbeat")
+                        }
+                    }
+                }
+            }
+        }
+
+        func stopWebHeartbeat() {
+            webHeartbeatTimer?.invalidate()
+            webHeartbeatTimer = nil
+        }
+
+        /// One reload per 15 s at most: a failing page must not become a reload loop.
+        func reloadAfterContentDeath(_ web: WKWebView, reason: String) {
+            if let last = lastHeartbeatReloadAt, Date().timeIntervalSince(last) < 15 {
+                print("[DSH] webview reload suppressed (reason=\(reason), too soon)")
+                return
+            }
+            lastHeartbeatReloadAt = Date()
+            print("[DSH] webview reload (reason=\(reason))")
+            hideOffline()
+            web.load(URLRequest(url: PHONE_URL))
         }
 
         /// Advertise native playback capability once the page is up.
@@ -462,6 +509,7 @@ struct WebView: UIViewRepresentable {
             cancelLoadWatchdog()
             hideOffline()
             didAutoRetry = false
+            startWebHeartbeat()
             webView.evaluateJavaScript("window.__phoneHasPlayAudio = true;", completionHandler: nil)
             /* report the installed IPA so the phone can announce a newer build */
             let info = Bundle.main.infoDictionary ?? [:]
