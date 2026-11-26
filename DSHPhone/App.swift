@@ -706,6 +706,16 @@ struct WebView: UIViewRepresentable {
                 else if let n = body["ms"] as? NSNumber { rawMs = n.intValue }
                 else { rawMs = 1500 }
                 self.scheduleQuit(afterMs: max(200, min(10000, rawMs)))
+            case "copyText":
+                /* native clipboard write: WebKit refuses the page's own clipboard
+                   API when the update is host-triggered (no user gesture), which
+                   left the LiveContainer-close automation with nothing to install */
+                if let text = body["text"] as? String, !text.isEmpty, text.utf8.count <= 4096 {
+                    UIPasteboard.general.string = text
+                    postJS("window.__phoneCopied && window.__phoneCopied(true)")
+                } else {
+                    postJS("window.__phoneCopied && window.__phoneCopied(false)")
+                }
             case "savePhoto":
                 if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64), let image = UIImage(data: data) {
                     UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)

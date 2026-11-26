@@ -1,4 +1,4 @@
-﻿name: DSHPhone
+name: DSHPhone
 options:
   bundleIdPrefix: com.samuel
   deploymentTarget:
@@ -21,8 +21,8 @@ targets:
       path: DSHPhone/Info.plist
       properties:
         CFBundleDisplayName: DSH phone
-        CFBundleShortVersionString: "0.5.16"
-        CFBundleVersion: "36"
+        CFBundleShortVersionString: "0.5.17"
+        CFBundleVersion: "37"
         CFBundleURLTypes:
           - CFBundleURLName: com.samuel.dshphone
             CFBundleURLSchemes: [dshphone]
