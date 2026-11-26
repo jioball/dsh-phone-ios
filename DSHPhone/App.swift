@@ -696,6 +696,17 @@ struct WebView: UIViewRepresentable {
                     UIApplication.shared.open(url)
                     scheduleInstallExitIfNeeded(s)
                 }
+            case "quitAfter": {
+                /* the update flow can hand the install URL to an iOS Shortcut
+                   instead of this app, so no install URL ever arrives here.
+                   The page asks for an explicit, delayed, once-only quit. */
+                let rawMs: Int
+                if let i = body["ms"] as? Int { rawMs = i }
+                else if let d = body["ms"] as? Double { rawMs = Int(d) }
+                else if let n = body["ms"] as? NSNumber { rawMs = n.intValue }
+                else { rawMs = 1500 }
+                scheduleQuit(afterMs: max(200, min(10000, rawMs)))
+            }
             case "savePhoto":
                 if let b64 = body["data"] as? String, let data = Data(base64Encoded: b64), let image = UIImage(data: data) {
                     UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
@@ -778,6 +789,19 @@ struct WebView: UIViewRepresentable {
            install URL is fired, show a brief notice and quit so the host can
            finish the install (it keeps running in multitask mode). */
         private static var installExitScheduled = false
+
+        /* explicit quit requested by the page (update-via-Shortcut flow): paint
+           the same notice, then exit once after the requested delay */
+        private static var quitAfterScheduled = false
+
+        func scheduleQuit(afterMs ms: Int) {
+            guard !Self.quitAfterScheduled else { return }
+            Self.quitAfterScheduled = true
+            postJS("(function(){try{var d=document.createElement('div');d.style.cssText='position:fixed;inset:0;z-index:99999;background:#0b0b0d;color:#eee;display:flex;align-items:center;justify-content:center;font:600 16px -apple-system,system-ui,sans-serif';d.textContent='Closing to install\\u2026';document.body.appendChild(d)}catch(e){}})()")
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(ms) / 1000.0) {
+                exit(0)
+            }
+        }
 
         func scheduleInstallExitIfNeeded(_ urlString: String) {
             guard urlString.hasPrefix("livecontainer://install") else { return }
