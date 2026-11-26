@@ -146,6 +146,14 @@ struct WebView: UIViewRepresentable {
         var keepAliveURL: URL?
         var isBackground = false
 
+        /* ---------- no-black-screen: native offline state ---------- */
+        var offlineView: UIView?
+        var offlineDetail: UILabel?
+        var offlineSpinner: UIActivityIndicatorView?
+        var loadWatchdog: Timer?
+        var offlineRetryTimer: Timer?
+        var didAutoRetry = false
+
         override init() {
             super.init()
             synthesizer.delegate = self
@@ -161,6 +169,8 @@ struct WebView: UIViewRepresentable {
             ) { [weak self] _ in
                 self?.isBackground = false
                 self?.stopKeepAlive()
+                /* returning to an offline screen is the cheapest moment to retry */
+                if let self, self.offlineView?.isHidden == false { self.retryLoad() }
             }
         }
 
@@ -214,6 +224,107 @@ struct WebView: UIViewRepresentable {
             web.scrollView.contentInset = .zero
             web.scrollView.verticalScrollIndicatorInsets = .zero
             web.scrollView.horizontalScrollIndicatorInsets = .zero
+        }
+
+        /* ---------- no-black-screen: the offline surface ---------- */
+
+        private static let pageBG = UIColor(red: 17.0 / 255.0, green: 17.0 / 255.0, blue: 17.0 / 255.0, alpha: 1.0)
+        private static let accentBG = UIColor(red: 92.0 / 255.0, green: 132.0 / 255.0, blue: 255.0 / 255.0, alpha: 1.0)
+
+        /// Build (once) and reveal the native offline view over the webview.
+        func showOffline(reason: String) {
+            cancelLoadWatchdog()
+            guard let web, let host = web.superview else { return }
+            let container: UIView
+            if let existing = offlineView {
+                container = existing
+            } else {
+                container = UIView()
+                container.translatesAutoresizingMaskIntoConstraints = false
+                container.backgroundColor = Self.pageBG
+                container.isHidden = true
+
+                let title = UILabel()
+                title.text = "Can't reach the host"
+                title.font = .systemFont(ofSize: 20, weight: .bold)
+                title.textColor = .white
+                title.textAlignment = .center
+
+                let detail = UILabel()
+                detail.font = .systemFont(ofSize: 13)
+                detail.textColor = UIColor(white: 0.62, alpha: 1)
+                detail.textAlignment = .center
+                detail.numberOfLines = 0
+                offlineDetail = detail
+
+                let button = UIButton(type: .system)
+                button.setTitle("Retry", for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+                button.setTitleColor(.white, for: .normal)
+                button.backgroundColor = Self.accentBG
+                button.layer.cornerRadius = 20
+                button.contentEdgeInsets = UIEdgeInsets(top: 10, left: 28, bottom: 10, right: 28)
+                button.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
+
+                let spinner = UIActivityIndicatorView(style: .medium)
+                spinner.color = UIColor(white: 0.7, alpha: 1)
+                spinner.hidesWhenStopped = true
+                offlineSpinner = spinner
+
+                let stack = UIStackView(arrangedSubviews: [title, detail, button, spinner])
+                stack.axis = .vertical
+                stack.alignment = .center
+                stack.spacing = 14
+                stack.translatesAutoresizingMaskIntoConstraints = false
+                container.addSubview(stack)
+                NSLayoutConstraint.activate([
+                    stack.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+                    stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                    stack.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor, constant: 32),
+                    stack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -32),
+                ])
+                host.addSubview(container)
+                NSLayoutConstraint.activate([
+                    container.topAnchor.constraint(equalTo: web.topAnchor),
+                    container.bottomAnchor.constraint(equalTo: web.bottomAnchor),
+                    container.leadingAnchor.constraint(equalTo: web.leadingAnchor),
+                    container.trailingAnchor.constraint(equalTo: web.trailingAnchor),
+                ])
+                offlineView = container
+            }
+            offlineDetail?.text = "\(reason). Check the Tailscale connection on this phone, then retry."
+            container.isHidden = false
+            host.bringSubviewToFront(container)
+            /* one automatic retry, not a loop: a wedged tunnel needs the app
+               foregrounded anyway, and a hot loop would burn battery */
+            if !didAutoRetry {
+                didAutoRetry = true
+                offlineRetryTimer?.invalidate()
+                offlineRetryTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { [weak self] _ in
+                    self?.retryLoad()
+                }
+            }
+        }
+
+        func hideOffline() {
+            offlineRetryTimer?.invalidate()
+            offlineRetryTimer = nil
+            offlineSpinner?.stopAnimating()
+            offlineView?.isHidden = true
+        }
+
+        @objc func retryTapped() {
+            didAutoRetry = true /* user-initiated: don't fire the 5 s auto-retry too */
+            retryLoad()
+        }
+
+        func retryLoad() {
+            guard let web else { return }
+            offlineRetryTimer?.invalidate()
+            offlineRetryTimer = nil
+            offlineSpinner?.startAnimating()
+            armLoadWatchdog()
+            web.reload()
         }
 
         func hideAccessoryViews() {
@@ -348,6 +459,9 @@ struct WebView: UIViewRepresentable {
 
         /// Advertise native playback capability once the page is up.
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            cancelLoadWatchdog()
+            hideOffline()
+            didAutoRetry = false
             webView.evaluateJavaScript("window.__phoneHasPlayAudio = true;", completionHandler: nil)
             /* report the installed IPA so the phone can announce a newer build */
             let info = Bundle.main.infoDictionary ?? [:]
@@ -355,6 +469,51 @@ struct WebView: UIViewRepresentable {
             let build = info["CFBundleVersion"] as? String ?? "0"
             let js = "window.__phoneAppVersion && window.__phoneAppVersion('\(version)', '\(build)');"
             webView.evaluateJavaScript(js, completionHandler: nil)
+        }
+
+        /* ---------- no-black-screen: watchdog + failure surfaces ---------- */
+
+        /// A wedged tailnet answers nothing, so WebKit's load can hang for
+        /// minutes with a black screen. Arm a 20 s watchdog per navigation.
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            armLoadWatchdog()
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            showOffline(reason: Self.shortError(error))
+        }
+
+        func webView(_ webView: WKWebView,
+                     didFailProvisionalNavigation navigation: WKNavigation!,
+                     withError error: Error) {
+            showOffline(reason: Self.shortError(error))
+        }
+
+        func armLoadWatchdog() {
+            cancelLoadWatchdog()
+            loadWatchdog = Timer.scheduledTimer(withTimeInterval: 20, repeats: false) { [weak self] _ in
+                guard let self, self.offlineView?.isHidden != false else { return }
+                self.showOffline(reason: "Host did not answer")
+            }
+        }
+
+        func cancelLoadWatchdog() {
+            loadWatchdog?.invalidate()
+            loadWatchdog = nil
+        }
+
+        static func shortError(_ error: Error) -> String {
+            let ns = error as NSError
+            switch ns.code {
+            case NSURLErrorNotConnectedToInternet: return "No internet connection"
+            case NSURLErrorCannotFindHost: return "Cannot reach the host"
+            case NSURLErrorTimedOut: return "Host did not answer"
+            case NSURLErrorCannotConnectToHost: return "Host refused the connection"
+            case NSURLErrorNetworkConnectionLost: return "Connection lost"
+            default:
+                let text = ns.localizedDescription
+                return text.count > 60 ? String(text.prefix(60)) : text
+            }
         }
 
         /// JS: window.webkit.messageHandlers.phone.postMessage({ kind: "photos" | "documents" })
