@@ -10,6 +10,32 @@ import ObjectiveC
 /// neither draws its ◀ ▶ Done bar nor reserves the ~44pt it occupies.
 final class NoAccessoryWebView: WKWebView {
     override var inputAccessoryView: UIView? { nil }
+    /* iOS's shake gesture offers "Undo Typing" by asking the first responder's
+       undo manager. applicationSupportsShakeToEdit alone does not stop the web
+       content, so report no undo manager and swallow the motion event too: a
+       jostled phone must never pop that sheet over the chat. */
+    override var undoManager: UndoManager? { nil }
+    override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
+        if motion == .motionShake { return }
+        super.motionEnded(motion, with: event)
+    }
+}
+
+/// Swizzle helper: makes the internal WKContentView's undoManager nil, so the
+/// actual first responder (not just this webview) has nothing to offer on shake.
+private final class UndoNilHelper: NSObject {
+    @objc var undoManager: UndoManager? { nil }
+}
+
+func suppressUndo(in web: WKWebView) {
+    guard let content = web.scrollView.subviews.first(where: {
+        String(describing: type(of: $0)).hasPrefix("WKContent")
+    }) else { return }
+    let cls: AnyClass = type(of: content)
+    guard let original = class_getInstanceMethod(cls, Selector(("undoManager"))),
+          let swizzled = class_getInstanceMethod(UndoNilHelper.self, Selector(("undoManager")))
+    else { return }
+    method_exchangeImplementations(original, swizzled)
 }
 
 /// Swizzle helper: makes the internal WKContentView's inputAccessoryView nil.
@@ -140,6 +166,7 @@ struct WebView: UIViewRepresentable {
         WebView.AppLink.webView = web
         context.coordinator.stripKeyboardAccessoryBar(from: web)
         suppressKeyboardAccessory(in: web)
+        suppressUndo(in: web)
         web.load(URLRequest(url: PHONE_URL))
         return web
     }
